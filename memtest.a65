@@ -1,0 +1,476 @@
+;MEMORY TEST from OS65D 2.0 published in OSI Small System Journal Vol1 No.3, Sept 1977
+;Modified for universal use OSI400 ASCII KB, OSI C1P/SUPERBOARD, C2/C4/C8, C3 Serial systems by Mark Spankus
+;relocated to $222 to survive OSI <RESET>
+;occupies $0222-$03FF or so
+;
+; USAGE:  Commands are: T, L, C
+; The low memory address available for testing is $0400 as the program occupies the space $0000-03FF
+; [T]est Memory T:<start>,<end> ... Enter T04002000 to test RAM from 0400 to 1FFF
+;   address will count up, foe each loop that completes successfully an X will be displayed on the screen
+;   if an error is encountered, the address will be displayed with the written content and the read content
+;   press <CR> to restart the program
+; [L]oad Memory L:<start>,<end>=<data> ... Enter L04002000FF to fill 0400 to 1FFF with FF, a * is printed when complete
+; [C]ompare Memory C:<start>,<end>=<data> ... Enter C04000500FF to check 0400-04FF for FF, a * is printed when complete
+
+MEMBEG	=	$200		;The starting address when probing for memory size
+
+PIA	=	$AC00
+PIAORA	=	PIA+0
+PIADDA	=	PIA+0
+PIACRA	=	PIA+1
+PIAORB	=	PIA+2
+PIADDB	=	PIA+2
+PIACRB	=	PIA+3
+
+
+
+USRCMD	=	$C4		;Command character entered by the user
+PASCTR	=	$C5		;Pass Counter
+VAR1	=	$C7
+VAR2	=	$C8
+VAR3	=	$C9
+MEMPTR	=	$CA
+MEMPLO	=	MEMPTR
+MEMPHI	=	MEMPTR+1
+ENDPTR	=	$CC
+ENDPLO	=	ENDPTR
+ENDPHI	=	ENDPTR+1
+
+;Display Format:
+;XXXX YYYY AA BBBB CC DD
+;XXXXYYYY AABBBB CCDD
+;XXXX = Starting address
+;YYYY = Ending address
+;AA = Number of passes
+;BBBB = Current address
+;CC = Expected byte
+;DD = Read byte
+
+.segment "CODE"
+START:	SEI
+	LDX	#$FF
+	TXS
+
+	;Select the output registers of ports A and B
+	LDA	#04
+	STA	PIACRA
+	STA	PIACRB
+
+	;Reset the display select bits to their resting state
+	LDA	#%11111100
+	STA	PIAORA
+	;Reset the data bits to their resting state
+	LDA	#$80
+	STA	PIAORB
+
+	LDA	#00
+	STA	PIACRA
+	STA	PIACRB
+	LDA	#$FF
+	STA	PIADDA
+	STA	PIADDB
+
+	LDA	#04
+	STA	PIACRA
+	STA	PIACRB
+
+;Test zero-page to make sure everything is good there
+	LDX	#$00
+ZPTLUP:	LDA	#$00
+	STA	$00,X
+	LDA	$00,X
+	BNE	ZPBAD
+	LDA	#$FF
+	STA	$00,X
+	LDA	$00,X
+	CMP	#$FF
+	BNE	ZPBAD
+	INX
+	BNE	ZPTLUP
+	
+	;X is 0
+	;Test the stack too
+STTLUP:	LDA	#$00
+	STA	$100,X
+	LDA	$100,X
+	BNE	STBAD
+	LDA	#$FF
+	STA	$100,X
+	LDA	$100,X
+	CMP	#$FF
+	BNE	STBAD
+	INX
+	BNE	STTLUP
+
+	JMP	PGSGUD		;Pages look good, jump to start
+
+
+ZPBAD:	LDX	#$00
+ZPBLP:	LDA	ZPFAIL,X	;Get the character to send to the display
+	ORA	#$80		;Set the cursor select bit
+	STA	PIAORB		;Set the data lines
+
+	INX
+	LDA	ZPFAIL,X	;Get the display and character select bits
+	STA	PIAORA		;Set the lines
+	AND	#$7F		;Set ~W low
+	STA	PIAORA
+	ORA	#$80		;Set ~W high
+	STA	PIAORA
+
+	INX
+	CPX	#40
+	BNE	ZPBLP
+	BEQ	*		;Just sit in a loop when done
+
+
+STBAD:	LDX	#$00
+STBLP:	LDA	STFAIL,X	;Get the character to send to the display
+	ORA	#$80		;Set the cursor select bit
+	STA	PIAORB		;Set the data lines
+
+	INX
+	LDA	STFAIL,X	;Get the display and character select bits
+	STA	PIAORA		;Set the lines
+	AND	#$7F		;Set ~W low
+	STA	PIAORA
+	ORA	#$80		;Set ~W high
+	STA	PIAORA
+
+	INX
+	CPX	#40
+	BNE	STBLP
+	BEQ	*		;Just sit in a loop when done
+
+	;Pages are good, now we can use zero-page and the stack
+PGSGUD:	JSR	DISCLR		;Clear the display
+
+	;Output the starting address to the first 4 characters of the display
+	LDX	#00
+	LDA	#>MEMBEG
+	JSR	BYTOUT
+	LDA	#<MEMBEG
+	JSR	BYTOUT
+
+	JSR	MEMSIZ		;Size the memory
+	
+	;Output the ending address to characters 4-7 of the display
+	LDX	#04
+	LDA	ENDPHI
+	JSR	BYTOUT
+	LDA	ENDPLO
+	JSR	BYTOUT
+
+	;Output the successful pass counter
+	LDX	#09
+	LDA	#$00
+	JSR	BYTOUT
+
+	;Set up the starting memory address pointer
+	LDA	#<MEMBEG
+	STA	VAR2
+	LDA	#>MEMBEG
+	STA	VAR3
+
+	LDA	#$77
+	STA	VAR1
+	LDX	#$00
+	LDY	#$00
+
+;Start the test!
+;X is used to keep track of the number of passes
+;Y should be 0
+
+;Start of Test
+STRTST:	JSR	RESTRT		;Move VAR2,VAR3 (user-entered starting address) into MEMPTR pointer
+
+	TXA			;Output the current pass
+
+	LDX	#11		;Start at character 11
+	JSR	BYTOUT
+	
+	TAX			;Restore the pass number
+
+;Set all memory locations from VAR2,VAR3 to ENDPTR to the value calculated by GTSVAL
+TSTWRT:	JSR	GTSVAL		;Get a test data value based on the memory pointer address
+	STA	(MEMPTR),Y	;Store it at the address we're testing
+	JSR	INMPTR		;Increment the memory pointer
+	BNE	TSTWRT		;Loop again if MEMPTR <> ENDPTR
+
+	
+;Read back all memory locations from VAR2,VAR3 to ENDPTR and compare them to the calculated GTSVAL
+	JSR	RESTRT		;Restore START value to MEMPTR
+TESTRD:	JSR	GTSVAL		;Get the test data value based on the current memory pointer
+	CMP	(MEMPTR),Y		;Compare it to what was stored in the previous loop
+	BNE	TSTERR		;If they're different, throw an error
+	JSR	INMPTR		;Increment the memory pointer
+	BNE	TESTRD		;Loop again if MEMPTR <> ENDPTR
+
+	INX			;Increment the number of test passes
+	BNE	STRTST		;If we're <256 passes, test again.
+
+
+;Increment the pass counter and update the pass count on the display
+	INC	PASCTR
+	LDA	PASCTR
+	LDX	#09
+	JSR	BYTOUT
+	LDX	#$00
+	JMP	STRTST		;Start next pass!
+
+
+;Diplay the test error code
+;A contains the value that should have been read back
+TSTERR:	STA	VAR3		;Save value for later
+	LDA	(MEMPTR),Y
+	STA	VAR2
+
+;Output (MEMPHI,MEMPLO),VAR3,VAR2 in the form
+; MEMPTR GOOD BAD
+	LDX	#09		;Start outputting error at character position 9
+
+	LDA	MEMPHI
+	JSR	BYTOUT
+	LDA	MEMPLO
+	JSR	BYTOUT
+	LDA	#' '
+	JSR	COUT
+	LDA	VAR3
+	JSR	BYTOUT
+	LDA	#' '
+	JSR	COUT
+	LDA	VAR2
+	JSR	BYTOUT
+
+	JMP	*		;Just sit in a loop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMSIZ -- Memory Size
+;Calculates the amount of memory to test starting from
+;  $0200 and stopping once it can't write.
+;At the end, ENDPTR contains the first non-writable
+;  memory address.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MEMSIZ:	LDA	#<MEMBEG	;Load the starting address
+	STA	ENDPLO
+	LDA	#>MEMBEG
+	STA	ENDPHI
+	LDX	#00		;Use X as the zero source, and zero index
+
+MEMSLP:	TXA			;0 -> A
+	;Test by writing $00
+	STA	(ENDPTR,X)	;Write it	
+	LDA	(ENDPTR,X)	;Read it back
+	BNE	MEMSEN		;Didn't read back $00. End sizing.
+	;Test by writing $FF
+	CLC			;Complement A ($00 -> $FF)
+	SBC	#$00
+	STA	(ENDPTR,X)	;Write it
+	LDA	(ENDPTR,X)	;Read it back
+	CMP	#$FF		;Compare it
+	BNE	MEMSEN		;Didn;t read back $FF. End sizing.
+	;Increment to the next byte
+	INC	ENDPLO
+	BNE	MEMSLP
+	INC	ENDPHI
+	BNE	MEMSLP
+
+MEMSEN:	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;INMPTR -- Increment Memory Pointer
+;Increments the memory pointer and compares the new value
+;  to ENDPTR. Compare flags are set.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+INMPTR:	INC	MEMPTR		;Increment the low byte
+	BNE	IMPCMP		;Didn't overflow, skip incrementing high byte
+	INC	MEMPTR+1	;Increment the high byte
+;Increment Memory Pointer CoMPare
+IMPCMP:	LDA	MEMPTR+1	;Compare the high byte
+	CMP	ENDPTR+1
+	BNE	IMPEND		;Return with Z flag clear if different
+	LDA	MEMPTR		;Compare the low byte
+	CMP	ENDPTR
+
+IMPEND:	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;RESTRT -- Restore Start
+;Move the VAR2,VAR3 pair into MEMPTR,MEMPTR+1
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RESTRT:	LDA	VAR2
+	STA	MEMPTR
+	LDA	VAR3
+	STA	MEMPTR+1
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;GTSVAL -- Get Test Value
+;Calculates a byte that is derived from the current
+;  memory address and pass count and return it in A
+;A = (MEMPTR ^ MEMPTR+1) ^ PASS_COUNT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GTSVAL:	LDA	MEMPTR
+	EOR	MEMPTR+1
+	STA	VAR1
+	TXA
+	EOR	VAR1
+	RTS
+
+BYTOUT:	PHA
+	PHA
+	LSR	A
+	LSR	A
+	LSR	A
+	LSR	A
+	AND	#$0F
+	JSR	NYBOUT
+	PLA
+	JSR	NYBOUT
+	PLA
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;NYBOUT -- Nybble Out
+;Outputs the hex nybble in the lower 4 bits of A as a
+;  single ASCII character
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NYBOUT:	ORA	#$30		;Place the value up in the ASCII range
+
+	CMP	#':'		;Greater than '9'?
+	BMI	NYBGUD		;Nope, output the character
+	CMP	#'G'		;Greater than 'G'?
+	BCS	NYBBAD		;Yes, skip outputting the character
+
+	CLC			;Add 7 to push the value to A-F if it is greater than 9
+	ADC #$07
+
+NYBGUD:	JMP COUT		;Echo the character, and save an RTS by using a jmp.
+NYBBAD:	RTS			;Nybble is not valid
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COUT -- Character Out
+;
+;Write the character in A to the display character indexed
+;  by X and then increments X
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+COUT:	JSR	SCHAR		;Set character
+	INX			;Advance to the next character of the display
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;DISCLR -- Display Clear
+;
+;Clear the display by writing all spaces to it
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DISCLR:	LDA	#' '		;Space character
+	LDX	#19		;All 20 characters
+DISCLP:	JSR	SCHAR
+	DEX
+	CPX	#$FF
+	BNE	DISCLP
+
+	RTS
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SCHAR -- Set Character
+;
+;Sets the display character X to the character in A
+;
+;Display PIA mapping:
+;PA0 = A0	Digit select 0
+;PA1 = A1	Digit select 1
+;PA2 = ~CE1	Display 0	111110XX 0111 1100
+;PA3 = ~CE2	Display 1	111101XX
+;PA4 = ~CE3	Dispaly 2	111011XX
+;PA5 = ~CE4	Display 3	110111XX
+;PA6 = ~CE5	Display 4	101111XX
+;PA7 = ~W	Write		Data is clocked into display on rising edge
+;
+;PB0-PB6 = D0-D6	Data
+;PB7 = ~CU	Cursor input
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SCHAR:	PHA			;Preserve A
+
+	ORA	#$80		;Set the Cursor Input bit
+	STA	PIAORB		;Set the data lines
+
+
+	TXA			;Get the character position to write to
+	PHA			;Preserve X
+	PHA			;Save it for later
+	LSR	A		;Shift the display select bits down
+	LSR	A
+	TAX			;Use them as an index
+	PLA			;Restore the character position bits (and some other junk)
+	AND	#$03		;Mask off just the character select bits
+	ORA	DISPCE,X	;OR in the display select bits (should look like 1XXXXXYY now; X = display select (lo), Y = character select(hi))
+	STA	PIAORA		;Output the character address, select the display, and keep ~W high
+	;Toggle ~W low
+	AND	#$7F
+	STA	PIAORA
+	;Toggle ~W high
+	ORA	#$80
+	STA	PIAORA
+
+	;Reset the display select bits to their resting state
+	LDA	#%11111100
+	STA	PIAORA
+	;Reset the data bits to their resting state
+	LDA	#$80
+	STA	PIAORB
+
+	PLA			;Restore X
+	TAX
+	PLA			;Restore A
+	RTS
+
+ZPFAIL:	.byte 'Z',%11111000 | 0
+	.byte 'E',%11111000 | 1
+	.byte 'R',%11111000 | 2
+	.byte 'O',%11111000 | 3
+	.byte '-',%11110100 | 0
+	.byte 'P',%11110100 | 1
+	.byte 'A',%11110100 | 2
+	.byte 'G',%11110100 | 3
+	.byte 'E',%11101100 | 0
+	.byte ' ',%11101100 | 1
+	.byte 'F',%11101100 | 2
+	.byte 'A',%11101100 | 3
+	.byte 'I',%11011100 | 0
+	.byte 'L',%11011100 | 1
+	.byte 'U',%11011100 | 2
+	.byte 'R',%11011100 | 3
+	.byte 'E',%10111100 | 0
+	.byte ' ',%10111100 | 1
+	.byte ' ',%10111100 | 2
+	.byte ' ',%10111100 | 3
+
+STFAIL:	.byte 'S',%11111000 | 0
+	.byte 'T',%11111000 | 1
+	.byte 'A',%11111000 | 2
+	.byte 'C',%11111000 | 3
+	.byte 'K',%11110100 | 0
+	.byte ' ',%11110100 | 1
+	.byte 'P',%11110100 | 2
+	.byte 'A',%11110100 | 3
+	.byte 'G',%11101100 | 0
+	.byte 'E',%11101100 | 1
+	.byte ' ',%11101100 | 2
+	.byte 'F',%11101100 | 3
+	.byte 'A',%11011100 | 0
+	.byte 'I',%11011100 | 1
+	.byte 'L',%11011100 | 2
+	.byte 'U',%11011100 | 3
+	.byte 'R',%10111100 | 0
+	.byte 'E',%10111100 | 1
+	.byte ' ',%10111100 | 2
+	.byte ' ',%10111100 | 3
+
+DISPCE:	.byte %11111000, %11110100, %11101100, %11011100, %10111100
+
+.segment "VECTORS"
+.word	START
+.word	START
+.word	START

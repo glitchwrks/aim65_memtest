@@ -1,0 +1,64 @@
+MEMORY TEST
+
+ 
+MEMORY TEST PROGRAM FOR VIDEO AND 
+SERIAL-BASED COMPUTERS
+
+
+
+The following program is listed here, and on track 29 for serial-based computers, and track 40 for video-based computers on all OS65D Version 2.0 diskettes.
+ 
+The Memory Test Program consists of three parts: a test part, which checks dynamically for pattern senstivity and bit failures; a static memory test load routine; and a static memory test compare routine.
+
+ 
+
+The dynamic portion of the Memory Test Program utilizes a romping bit test successively through memory and on video systems, it prints out the pass that it is on. When the dynamic memory test makes 256 passes through memory, it wiil place an X on the video screen or on the serial system. If a block of memory makes it through this test twice--that is, places two X's--there is a 99.5% probability that it has no dynamic problems. 
+
+If an error occurs, the location of the error will be printed out, along with the data that was supposed to be in that memory location, and the data that was really in that memory location.
+
+ There are several possible failure modes that can be shown by this. 
+This test can find and address line shorts, data line shorts, address-to-data line shorts, pattern sensitivities, and dead memory chips. If your memory board has once worked, such as an OSI-manufactured memory board, then the possibility of shorts occurring later on the board is very unlikely. Thus, if you are checking a system that has started to break down, it has most likely developed a problem in a memory chip. 
+This can be recognized with the dynamic memory test by having one bit be wrong at all times within a block of memory. 
+
+For instance, the test shows a 60 turned into a 62 at location 6023. This would indicate that something is wrong with data bit 1 in that block of memory. If the memory board were a 4K, and it were found that the same failure occurred anywhere in the block from 600 to 7000; you may be virtually assured of a dead memory chip.  However, memory chips do not always fail completely. That is, they may have one or a few bad locations, while the rest are still fine.
+
+
+
+Another dynamic memory failure is pattern sensitivity. Most cases of pattern sensitivity cannot be checked for with the Memory Test because, in order to thoroughly test the memory chip for pattern sensitivity, you will need a number of patterns equal to the factorial of the size of 'the chip. For instance, if you have a 1K memory chip, you need 1024! patterns to test the chip, which is of course impossible, because that number is larger than the total number of atoms in the universe! Fortunately, memory chip design is carefully done to minimize the problem of pattern sensitivity. It is therefore extremely unlikely that it will occur in any of your memory boards. Out of thousands of boards, we have seen only about a half-dozen cases of memory failure based on pattern sensitivity.
+
+ 
+If you are testing a memory board out for the first time, the situation could be much trickier. Whenever possible, test a new memory board with memory chips which are known to be good; that is, take the memory chips out of a working board, and put them in your new board, and put your new chips in your working board. In this way. you will be able to check whether you have failures in memory chips, solder bridges or open foils.  
+Address line shorts can be somewhat difficult to interpret from the Memory Test Program, and address-to-data line shorts can be extremely difficult for a layman to find by way of a Memory Test Program.
+
+ Once you get a memory board to pass a dynamic memory test, you should then check it for static operation. That is, a very common failure mode of memory chips is to forget or change data over a period of several seconds to a few minutes. 
+There is a memory load command which allows you to load a block of memory with a particular bit pattern. 
+There is a memory compare routine which allows you to compare a block of memory against the bit pattern. 
+The procedure for this test should be to load memory with zeros, then wait two to five minutes and compare that block of memory against zeros. Then load the memory with FF, wait two to five minutes, and compare it with FF. Then load the memory with AA, and compare again. Finally load the memory with 55. Any errors will be reported as with the dynamic test. If the memory board passes the dynamic test, but fails this test, it is most probable that the memory chip specified directly by the error message is at fault.
+
+
+
+PROGRAM OPERATION
+
+
+The following instructions are for program operation. Both the serial and video programs start at location 0200 and extend upward for approximately two pages. The lower limit of testing on either program is location 0400 upward. 
+By attempting to test locations below this point, you would bomb the Memory Test program. 
+
+When the Memory Test Program is entered. a ? appears on the terminal. 
+It then expects a T for (dynamic) Test, an L for Load, or a C for Compare.  
+
+Your first test should be the dynamic test.  Therefore, type a T, then 0400, the starting address of the test, followed by a four-digit ending address of the test. Thus,if you had a 4K machine, you would type T04001000.
+ 
+
+
+On video-based computers, you will then see a two-digit counter increment, until it passes through FF, in which case it will place an X on the screen and increment again. The presence of an X indicates that it has successfully passed the test once. 
+
+On serial systems, you will not see anything until an X is printed out or a failure occurs. The Memory Test will take approximately two minutes to test 4K of memory. The only way to exit a successfully running dynamic memory test is by resetting the computer. 
+
+If a failure occurs, the test program reverts to the command mode so that additional commands can be typed in. 
+On failure the address of the failure is shown with the value written and the value read.
+
+The syntax for the L Command is simply L,SSSS,EEEE,nn, where nn is the two-digit byte pattern you wish to load. SSSS is the starting address of the memory you wish to load, and EEEE is its ending address. Once the load is complete, an asterisk (*) is put out on the screen. This should occur nearly instantaneously. 
+
+The syntax for a compare command is C SSSS,EEEE,nn. If the compare is successful, a * is printed on the screen. 
+If not, the first location to fail is printed out with its contents. 
+In all tests, the last location specified is not tested.
