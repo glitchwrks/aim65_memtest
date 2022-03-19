@@ -26,6 +26,7 @@ PIACRB	=	PIA+3
 
 USRCMD	=	$C4		;Command character entered by the user
 PASCTR	=	$C5		;Pass Counter
+MAXPAS	=	$C6		;Maximum number of passes
 VAR1	=	$C7
 VAR2	=	$C8
 VAR3	=	$C9
@@ -35,6 +36,7 @@ MEMPHI	=	MEMPTR+1
 ENDPTR	=	$CC
 ENDPLO	=	ENDPTR
 ENDPHI	=	ENDPTR+1
+TEMP	=	$CE
 
 ;Display Format:
 ;XXXX YYYY AA BBBB CC DD
@@ -74,22 +76,31 @@ START:	SEI
 	STA	PIACRA
 	STA	PIACRB
 
-;Test zero-page to make sure everything is good there
-	LDX	#$00
-ZPTLUP:	LDA	#$00
-	STA	$00,X
-	LDA	$00,X
-	BNE	ZPBAD
-	LDA	#$FF
-	STA	$00,X
-	LDA	$00,X
-	CMP	#$FF
-	BNE	ZPBAD
+	;Clear all of the cursor bits
+	LDX	#$00		
+CURCLP:	LDA	#$00		;D0 = 0, ~CU = 0
+	STA	PIAORB
+	LDA	DISPCE,X	;Get the chip select bits for this character
+	STA	PIAORA		;Set the lines
+	AND	#$7F		;Set ~W low
+	STA	PIAORA
+	ORA	#$80		;Set ~W high
+	STA	PIAORA
+
 	INX
-	BNE	ZPTLUP
-	
-	;X is 0
-	;Test the stack too
+	CPX	#20
+	BNE	CURCLP		;Clear the next cursor position
+;Display test! Please remove later!
+;	LDX	#$00
+;TSTLUP:	LDA	TESTSTRING,X
+;	JSR	COUT
+;	CPX	#20
+;	BNE	TSTLUP
+;
+;	JMP	*
+
+;Test the stack first so that we can use subroutine calls
+	LDX	#$00
 STTLUP:	LDA	#$00
 	STA	$100,X
 	LDA	$100,X
@@ -102,16 +113,45 @@ STTLUP:	LDA	#$00
 	INX
 	BNE	STTLUP
 
+
+	LDX	#$00
+STGLUP:	LDA	STGOOD,X
+	JSR	COUT
+	CPX	#20
+	BNE	STGLUP
+	JSR	DELAY
+
+	
+;Test zero-page too
+
+ZPTLUP:	LDA	#$00
+	STA	$00,X
+	LDA	$00,X
+	BNE	ZPBAD
+	LDA	#$FF
+	STA	$00,X
+	LDA	$00,X
+	CMP	#$FF
+	BNE	ZPBAD
+	INX
+	BNE	ZPTLUP
+
+	LDA	#<ZPGOOD
+	STA	MEMPLO
+	LDA	#>ZPGOOD
+	STA	MEMPHI
+	JSR	PRINT
+	JSR	DELAY
+
 	JMP	PGSGUD		;Pages look good, jump to start
+
 
 
 ZPBAD:	LDX	#$00
 ZPBLP:	LDA	ZPFAIL,X	;Get the character to send to the display
 	ORA	#$80		;Set the cursor select bit
 	STA	PIAORB		;Set the data lines
-
-	INX
-	LDA	ZPFAIL,X	;Get the display and character select bits
+	LDA	DISPCE,X	;Get the chip select bits for this character
 	STA	PIAORA		;Set the lines
 	AND	#$7F		;Set ~W low
 	STA	PIAORA
@@ -119,7 +159,7 @@ ZPBLP:	LDA	ZPFAIL,X	;Get the character to send to the display
 	STA	PIAORA
 
 	INX
-	CPX	#40
+	CPX	#20
 	BNE	ZPBLP
 	BEQ	*		;Just sit in a loop when done
 
@@ -128,9 +168,7 @@ STBAD:	LDX	#$00
 STBLP:	LDA	STFAIL,X	;Get the character to send to the display
 	ORA	#$80		;Set the cursor select bit
 	STA	PIAORB		;Set the data lines
-
-	INX
-	LDA	STFAIL,X	;Get the display and character select bits
+	LDA	DISPCE,X	;Get the chip select bits for this character
 	STA	PIAORA		;Set the lines
 	AND	#$7F		;Set ~W low
 	STA	PIAORA
@@ -138,55 +176,111 @@ STBLP:	LDA	STFAIL,X	;Get the character to send to the display
 	STA	PIAORA
 
 	INX
-	CPX	#40
+	CPX	#20
 	BNE	STBLP
 	BEQ	*		;Just sit in a loop when done
 
 	;Pages are good, now we can use zero-page and the stack
-PGSGUD:	JSR	DISCLR		;Clear the display
+PGSGUD:	;Test the RIOT's RAM
+	LDA	#<$A400
+	STA	VAR2
+	LDA	#>$A400
+	STA	VAR3
+	LDA	#<$A480
+	STA	ENDPLO
+	LDA	#>$A480
+	STA	ENDPHI
+	LDA	#$01
+	STA	MAXPAS		;Only test the RIOT's RAM once
+	JSR	MEMTST
 
-	;Output the starting address to the first 4 characters of the display
-	LDX	#00
-	LDA	#>MEMBEG
-	JSR	BYTOUT
-	LDA	#<MEMBEG
-	JSR	BYTOUT
+	LDA	#<RIOTGD
+	STA	MEMPLO
+	LDA	#>RIOTGD
+	STA	MEMPHI
+	JSR	PRINT
+	JSR	DELAY
 
-	JSR	MEMSIZ		;Size the memory
-	
-	;Output the ending address to characters 4-7 of the display
-	LDX	#04
-	LDA	ENDPHI
-	JSR	BYTOUT
-	LDA	ENDPLO
-	JSR	BYTOUT
-
-	;Output the successful pass counter
-	LDX	#09
-	LDA	#$00
-	JSR	BYTOUT
-
+	JSR	MEMSIZ		;Size the memory and write the ending address to ENDPTR
 	;Set up the starting memory address pointer
 	LDA	#<MEMBEG
 	STA	VAR2
 	LDA	#>MEMBEG
 	STA	VAR3
+	;Go for the full 256 passes (this will take a while!)
+	LDA	#$FF
+	STA	MAXPAS
+	JSR	MEMTST		;Start the full test
 
-	LDA	#$77
-	STA	VAR1
-	LDX	#$00
-	LDY	#$00
+	
 
 ;Start the test!
 ;X is used to keep track of the number of passes
 ;Y should be 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMTST -- Memory Test
+;
+;Test memory from (VAR2, VAR3) to ENDPTR
+;MAXPAS number of passes
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MEMTST:
+	JSR	DISCLR		;Clear the display
+	LDX	#$00
+	;Output the test starting address to characters 0-3
+	LDA	VAR3		;MSB
+	JSR	BYTOUT
+	LDA	VAR2		;LSB
+	JSR	BYTOUT
+	;Separator
+	LDA	#'-'
+	JSR	COUT
+	;Output the test ending address to character 4-7
+	;Start by decrementing first to create a less confusing number
+	LDA	ENDPLO
+	BNE	LENPHI		;Leave end pointer high alone if no underflow
+	DEC	ENDPHI
+	;Print it
+LENPHI:	DEC	ENDPLO
+	LDA	ENDPHI
+	JSR	BYTOUT
+	LDA	ENDPLO
+	JSR	BYTOUT
+	;Now increment the end pointer back up to what the test exppects
+	INC	ENDPLO
+	BNE	IENPHI		;Don't increment the high byte if no overflow
+	INC	ENDPHI		;Increment the high byte
+
+IENPHI:	INX			;Space
+	LDA	#'P'		;Pass count
+	JSR	COUT
+	LDA	#'='
+	JSR	COUT
+
+	;Reset and output the successful pass counter
+	LDA	#$00
+	STA	PASCTR
+	JSR	BYTOUT
+
+	INX			;Space
+	LDA	#'C'		;Cycle count
+	JSR	COUT
+	LDA	#'='
+	JSR	COUT
+
+;0000-0000 P=00 C=00
+
+	;Prepare the variables used by thes test
+	LDX	#$00		;X is used to keep track of the sub-pass
+	LDA	#$77		;Used for seeding something
+	STA	VAR1
 
 ;Start of Test
 STRTST:	JSR	RESTRT		;Move VAR2,VAR3 (user-entered starting address) into MEMPTR pointer
 
 	TXA			;Output the current pass
 
-	LDX	#11		;Start at character 11
+	LDX	#17		;Start at character 17
 	JSR	BYTOUT
 	
 	TAX			;Restore the pass number
@@ -213,32 +307,47 @@ TESTRD:	JSR	GTSVAL		;Get the test data value based on the current memory pointer
 ;Increment the pass counter and update the pass count on the display
 	INC	PASCTR
 	LDA	PASCTR
-	LDX	#09
+	CMP	MAXPAS		;Do we need to stop?
+	BEQ	TSTDUN		;Stop the test and return
+	LDX	#12
 	JSR	BYTOUT
 	LDX	#$00
 	JMP	STRTST		;Start next pass!
 
+TSTDUN:	RTS
 
 ;Diplay the test error code
 ;A contains the value that should have been read back
 TSTERR:	STA	VAR3		;Save value for later
 	LDA	(MEMPTR),Y
 	STA	VAR2
+	LDA	MEMPLO
+	STA	ENDPLO
+	LDA	MEMPHI
+	STA	ENDPHI
 
 ;Output (MEMPHI,MEMPLO),VAR3,VAR2 in the form
 ; MEMPTR GOOD BAD
-	LDX	#09		;Start outputting error at character position 9
+;ERROR@0000 E=00 R=00
+	LDA	#<MEMERR
+	STA	MEMPLO
+	LDA	#>MEMERR
+	STA	MEMPHI
+	JSR	PRINT
 
-	LDA	MEMPHI
+	;Output error address
+	LDX	#06
+
+	LDA	ENDPHI
 	JSR	BYTOUT
-	LDA	MEMPLO
+	LDA	ENDPLO
 	JSR	BYTOUT
-	LDA	#' '
-	JSR	COUT
+	
+	LDX	#13
 	LDA	VAR3
 	JSR	BYTOUT
-	LDA	#' '
-	JSR	COUT
+
+	LDX	#18
 	LDA	VAR2
 	JSR	BYTOUT
 
@@ -323,7 +432,6 @@ BYTOUT:	PHA
 	LSR	A
 	LSR	A
 	LSR	A
-	AND	#$0F
 	JSR	NYBOUT
 	PLA
 	JSR	NYBOUT
@@ -335,7 +443,8 @@ BYTOUT:	PHA
 ;Outputs the hex nybble in the lower 4 bits of A as a
 ;  single ASCII character
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-NYBOUT:	ORA	#$30		;Place the value up in the ASCII range
+NYBOUT:	AND	#$0F
+	ORA	#$30		;Place the value up in the ASCII range
 
 	CMP	#':'		;Greater than '9'?
 	BMI	NYBGUD		;Nope, output the character
@@ -374,6 +483,63 @@ DISCLP:	JSR	SCHAR
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PRINT -- Print a string
+;
+;Prints a string pointed to by MEMPTR to the display
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRINT:	PHA			;Preserve A
+	TXA			;Preserve X
+	PHA
+	TYA			;Preserve Y
+	PHA
+
+	LDX	#$00
+	LDY	#$00
+PRLOOP:	LDA	(MEMPTR),Y
+	JSR	COUT
+	INY
+	CPX	#20
+	BNE	PRLOOP
+
+	PLA			;Restore Y
+	TAY
+	PLA			;Restore X
+	TAX
+	PLA			;Restore A
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;DELAY -- Delay for a bit
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DELAY:	TXA
+	PHA
+	TYA
+	PHA
+
+	LDX	#$FF
+DLOOP1:	LDY	#$FF
+
+DLOOP2:	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	DEY
+	BNE	DLOOP2
+	DEX
+	BNE	DLOOP1
+
+	PLA
+	TAY
+	PLA
+	TAX
+
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;SCHAR -- Set Character
 ;
 ;Sets the display character X to the character in A
@@ -396,16 +562,7 @@ SCHAR:	PHA			;Preserve A
 	ORA	#$80		;Set the Cursor Input bit
 	STA	PIAORB		;Set the data lines
 
-
-	TXA			;Get the character position to write to
-	PHA			;Preserve X
-	PHA			;Save it for later
-	LSR	A		;Shift the display select bits down
-	LSR	A
-	TAX			;Use them as an index
-	PLA			;Restore the character position bits (and some other junk)
-	AND	#$03		;Mask off just the character select bits
-	ORA	DISPCE,X	;OR in the display select bits (should look like 1XXXXXYY now; X = display select (lo), Y = character select(hi))
+	LDA	DISPCE,X	;Get the display chip select+character select bit pattern
 	STA	PIAORA		;Output the character address, select the display, and keep ~W high
 	;Toggle ~W low
 	AND	#$7F
@@ -421,54 +578,26 @@ SCHAR:	PHA			;Preserve A
 	LDA	#$80
 	STA	PIAORB
 
-	PLA			;Restore X
-	TAX
 	PLA			;Restore A
 	RTS
 
-ZPFAIL:	.byte 'Z',%11111000 | 0
-	.byte 'E',%11111000 | 1
-	.byte 'R',%11111000 | 2
-	.byte 'O',%11111000 | 3
-	.byte '-',%11110100 | 0
-	.byte 'P',%11110100 | 1
-	.byte 'A',%11110100 | 2
-	.byte 'G',%11110100 | 3
-	.byte 'E',%11101100 | 0
-	.byte ' ',%11101100 | 1
-	.byte 'F',%11101100 | 2
-	.byte 'A',%11101100 | 3
-	.byte 'I',%11011100 | 0
-	.byte 'L',%11011100 | 1
-	.byte 'U',%11011100 | 2
-	.byte 'R',%11011100 | 3
-	.byte 'E',%10111100 | 0
-	.byte ' ',%10111100 | 1
-	.byte ' ',%10111100 | 2
-	.byte ' ',%10111100 | 3
+ZPFAIL:	.byte "ZERO-PAGE FAILURE   "
+ZPGOOD:	.byte "ZERO-PAGE PASSED    "
+STGOOD: .byte "STACK PAGE PASSED   "
+STFAIL:	.byte "STACK PAGE FAILURE  "
+RIOTFL: .byte "RIOT RAM FAILURE    "
+RIOTGD: .byte "RIOT RAM PASSED     "
+MEMERR: .byte "ERROR@0000 E=00 R=00"
 
-STFAIL:	.byte 'S',%11111000 | 0
-	.byte 'T',%11111000 | 1
-	.byte 'A',%11111000 | 2
-	.byte 'C',%11111000 | 3
-	.byte 'K',%11110100 | 0
-	.byte ' ',%11110100 | 1
-	.byte 'P',%11110100 | 2
-	.byte 'A',%11110100 | 3
-	.byte 'G',%11101100 | 0
-	.byte 'E',%11101100 | 1
-	.byte ' ',%11101100 | 2
-	.byte 'F',%11101100 | 3
-	.byte 'A',%11011100 | 0
-	.byte 'I',%11011100 | 1
-	.byte 'L',%11011100 | 2
-	.byte 'U',%11011100 | 3
-	.byte 'R',%10111100 | 0
-	.byte 'E',%10111100 | 1
-	.byte ' ',%10111100 | 2
-	.byte ' ',%10111100 | 3
-
-DISPCE:	.byte %11111000, %11110100, %11101100, %11011100, %10111100
+;Display CE decode table
+DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
+	.byte %11110111, %11110110, %11110101, %11110100
+	.byte %11101111, %11101110, %11101101, %11101100
+	.byte %11011111, %11011110, %11011101, %11011100
+	.byte %10111111, %10111110, %10111101, %10111100
+;Display Character decode table
+DISPCH: .byte 3,2,1,0
+TESTSTRING:	.byte "ABCDEFGHIJKLMNOPQRST",0
 
 .segment "VECTORS"
 .word	START
