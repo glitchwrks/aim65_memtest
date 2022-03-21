@@ -248,12 +248,6 @@ FULTST:	JSR	MEMSIZ		;Size the memory and write the ending address to ENDPTR
 	JMP	FULTST		;Loop the main test
 
 
-	
-
-;Start the test!
-;X is used to keep track of the number of passes
-;Y should be 0
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;MEMTST -- Memory Test
 ;
@@ -462,6 +456,12 @@ GTSVAL:	LDA	MEMPTR
 	EOR	VAR1
 	RTS
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;BYTOUT -- Byte Output
+;Write the binary byte in A as ASCII to the current display
+;  character specified by X. X is automatically
+;  incremented 2 times.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 BYTOUT:	PHA
 	PHA
 	LSR	A
@@ -631,9 +631,6 @@ DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 	.byte %11101111, %11101110, %11101101, %11101100
 	.byte %11011111, %11011110, %11011101, %11011100
 	.byte %10111111, %10111110, %10111101, %10111100
-;Display Character decode table
-DISPCH: .byte 3,2,1,0
-TESTSTRING:	.byte "ABCDEFGHIJKLMNOPQRST",0
 
 .segment "VECTORS"
 .word	START
