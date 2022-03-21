@@ -80,7 +80,89 @@ ENDPLO	=	ENDPTR
 ENDPHI	=	ENDPTR+1
 TEMP	=	$CE
 
+;Page sum macro
+;Assumes that X is already 0
+.macro	PGESUM	ADDR
+.local	PSUMLP
+PSUMLP:	CLC
+	ADC	ADDR,X
+	INX
+	BNE	PSUMLP
+.endmacro
 
+;Page test macro
+.macro	PGETST	ADDR
+.local	PTSTW, PTSTR, TSTBAD, END
+	LDX	#$00		;Pattern
+	LDY	#$00		;Index
+;Page test write loop.
+PTSTW:	TXA
+	STA	ADDR,Y
+	INX
+	INY
+	BNE	PTSTW
+	;X = starting pattern value
+	;Y = 0
+;Page test read loop
+PTSTR:	TXA			;Transfer the pattern to A
+	CMP	ADDR,Y		;Compare the pattern to what was written
+	BNE	TSTBAD		;If different, return with error
+	INX
+	INY
+	BNE	PTSTR
+	;X = starting pattern value
+	;Y = 0
+	INX			;Increment X to the next starting pattern bitmap
+	BNE	PTSTW		;Start the next cycle if pattern is not 0
+	;Once the starting pattern returns to 0, the test is done
+	CLC			;Return with carry clear, indicating a successful test
+	BCC	END
+TSTBAD:	SEC			;Return with carry set, indicating a failed test
+END:
+.endmacro
+
+;Simple delay macro
+.macro SDELAY
+.local	DLOOP1, DLOOP2
+	LDX	#$FF
+DLOOP1:	LDY	#$FF
+
+DLOOP2:	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+	DEY
+	BNE	DLOOP2
+	DEX
+	BNE	DLOOP1
+.endmacro
+
+;Simple message printer macro
+.macro	SPMSG ADDR
+.local	MSPLUP
+	LDX	#$00
+MSPLUP:	LDA	ADDR,X
+	ORA	#$80
+	STA	PIAORB
+	LDA	DISPCE,X
+	STA	PIAORA
+	AND	#$7F		;Set ~W low
+	STA	PIAORA
+	ORA	#$80		;Set ~W high
+	STA	PIAORA
+
+	INX
+	CPX	#20
+	BNE	MSPLUP
+.endmacro
+
+
+;Checksum the ROM before tests
+;Change $00 $FF tests to include $AA and $55. Make less address dependant
 .segment "CODE"
 START:	SEI
 	LDX	#$FF
@@ -123,28 +205,38 @@ CURCLP:	LDA	#$00		;D0 = 0, ~CU = 0
 	INX
 	CPX	#20
 	BNE	CURCLP		;Clear the next cursor position
-;Display test! Please remove later!
-;	LDX	#$00
-;TSTLUP:	LDA	TESTSTRING,X
-;	JSR	COUT
-;	CPX	#20
-;	BNE	TSTLUP
-;
-;	JMP	*
+
+;Run a checksum on the ROM
+	LDX	#$00
+	LDA	#$00
+	PGESUM	$F000
+	PGESUM	$F100
+	PGESUM	$F200
+	PGESUM	$F300
+	PGESUM	$F400
+	PGESUM	$F500
+	PGESUM	$F600
+	PGESUM	$F700
+	PGESUM	$F800
+	PGESUM	$F900
+	PGESUM	$FA00
+	PGESUM	$FB00
+	PGESUM	$FC00
+	PGESUM	$FD00
+	PGESUM	$FE00
+	PGESUM	$FF00
+	ORA	#$00		;Set the flags for A
+	BEQ	ROMGUD
+	SPMSG	RMFAIL
+	BEQ	*
+
+ROMGUD:	SPMSG	RMGOOD
+	SDELAY
 
 ;Test the stack first so that we can use subroutine calls
-	LDX	#$00
-STTLUP:	LDA	#$00
-	STA	$100,X
-	LDA	$100,X
-	BNE	STBAD
-	LDA	#$FF
-	STA	$100,X
-	LDA	$100,X
-	CMP	#$FF
-	BNE	STBAD
-	INX
-	BNE	STTLUP
+	SPMSG	STTEST
+	PGETST	$100		;Test stack page using the page test macro
+	BCS	STBAD		;Output error message if the stack is bad
 
 
 	LDX	#$00
@@ -156,18 +248,9 @@ STGLUP:	LDA	STGOOD,X
 
 	
 ;Test zero-page too
-
-ZPTLUP:	LDA	#$00
-	STA	$00,X
-	LDA	$00,X
-	BNE	ZPBAD
-	LDA	#$FF
-	STA	$00,X
-	LDA	$00,X
-	CMP	#$FF
-	BNE	ZPBAD
-	INX
-	BNE	ZPTLUP
+	SPMSG	ZPTEST
+	PGETST	$00
+	BCS	ZPBAD
 
 	LDA	#<ZPGOOD
 	STA	MEMPLO
@@ -197,21 +280,8 @@ ZPBLP:	LDA	ZPFAIL,X	;Get the character to send to the display
 	BEQ	*		;Just sit in a loop when done
 
 
-STBAD:	LDX	#$00
-STBLP:	LDA	STFAIL,X	;Get the character to send to the display
-	ORA	#$80		;Set the cursor select bit
-	STA	PIAORB		;Set the data lines
-	LDA	DISPCE,X	;Get the chip select bits for this character
-	STA	PIAORA		;Set the lines
-	AND	#$7F		;Set ~W low
-	STA	PIAORA
-	ORA	#$80		;Set ~W high
-	STA	PIAORA
-
-	INX
-	CPX	#20
-	BNE	STBLP
-	BEQ	*		;Just sit in a loop when done
+STBAD:	SPMSG	STFAIL
+	BEQ	*
 
 	;Pages are good, now we can use zero-page and the stack
 PGSGUD:	;Test the RIOT's RAM
@@ -617,8 +687,12 @@ SCHAR:	PHA			;Preserve A
 	PLA			;Restore A
 	RTS
 
-ZPFAIL:	.byte "ZERO-PAGE FAILURE   "
+RMFAIL:	.byte "ROM CHECKSUM FAILURE"
+RMGOOD: .byte "ROM CHECKSUM PASSED "
+ZPTEST:	.byte "TESTING ZERO-PAGE   "
 ZPGOOD:	.byte "ZERO-PAGE PASSED    "
+ZPFAIL:	.byte "ZERO-PAGE FAILURE   "
+STTEST: .byte "TESTING STACK PAGE  "
 STGOOD: .byte "STACK PAGE PASSED   "
 STFAIL:	.byte "STACK PAGE FAILURE  "
 RIOTFL: .byte "RIOT RAM FAILURE    "
@@ -631,6 +705,9 @@ DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 	.byte %11101111, %11101110, %11101101, %11101100
 	.byte %11011111, %11011110, %11011101, %11011100
 	.byte %10111111, %10111110, %10111101, %10111100
+
+;Checksum byte. Set to something that makes the entire ROM sum out to $00
+SUMBYT:	.byte $100-$95
 
 .segment "VECTORS"
 .word	START
