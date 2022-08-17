@@ -54,18 +54,50 @@
 ;  - E=YY: The byte that was expected to be read from the address.
 ;  - R=ZZ: The byte that was actually read from the address.
 
-MEMBEG	=	$200		;The starting address when probing for memory size
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMBEG -- Starting Address for Memory Autosize
+;
+;This value can be set higher to preserve the contents of
+;memory at lower addresses.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MEMBEG	=	$200		;Default to 0x0200, above stack
 
-PIA	=	$AC00
-PIAORA	=	PIA+0
-PIADDA	=	PIA+0
-PIACRA	=	PIA+1
-PIAORB	=	PIA+2
-PIADDB	=	PIA+2
-PIACRB	=	PIA+3
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;AIM-65 ASCII Display Equates
+;
+;The AIM-65's ASCII displays are interfaced through a PIA,
+;rather than sitting directly on the 6502's system bus.
+;
+;Display PIA bit assignments:
+;PA0 = A0	Digit select 0
+;PA1 = A1	Digit select 1
+;PA2 = *CE1	Display 0	111110XX
+;PA3 = *CE2	Display 1	111101XX
+;PA4 = *CE3	Dispaly 2	111011XX
+;PA5 = *CE4	Display 3	110111XX
+;PA6 = *CE5	Display 4	101111XX
+;PA7 = *W	Write		Data is clocked into display on 
+;				rising edge
+;
+;PB0-PB6 = D0-D6	Data
+;PB7 = *CU		Cursor input
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PIA	=	$AC00		;Display PIA base address
+PIAORA	=	PIA+0		;Port A output register
+PIADDA	=	PIA+0		;Port A data direction register
+PIACRA	=	PIA+1		;Port A control register
+PIAORB	=	PIA+2		;Port B output register
+PIADDB	=	PIA+2		;Port B data direction register
+PIACRB	=	PIA+3		;Port B control register
+CHARMOD	=	#$80		;Character output mode OR mask
+CURSMOD	=	#$7F		;Cursor output mode AND mask
+DCEIDLE	=	#%11111100	;Display select bits idle state
+DISPWR	=	#$7F		;Write to display AND mask
+NDISPWR	=	#$80		;Disable display write OR mask
 
-
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Zero Page Variables
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 USRCMD	=	$C4		;Command character entered by the user
 PASCTR	=	$C5		;Pass Counter
 MAXPAS	=	$C6		;Maximum number of passes
@@ -453,72 +485,82 @@ TSTERR:	STA	VAR3		;Save value for later
 
 	JMP	*		;Just sit in a loop
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;MEMSIZ -- Memory Size
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMSIZ -- Autosize available RAM
+;
+;Searches system memory from MEMBEG on to find the end of
+;writable RAM. Clobbers contents of memory tested.
 ;Calculates the amount of memory to test starting from
-;  $0200 and stopping once it can't write.
-;At the end, ENDPTR contains the first non-writable
-;  memory address.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;pre: MEMBEG initialized to start of memory to be tested
+;post: ENDPTR contains first non-RAM memory address
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 MEMSIZ:	LDA	#<MEMBEG	;Load the starting address
 	STA	ENDPLO
 	LDA	#>MEMBEG
 	STA	ENDPHI
 	LDX	#00		;Use X as the zero source, and zero index
 
-MEMSLP:	TXA			;0 -> A
-	;Test by writing $00
+MEMSI1:	TXA			;Test by writing 0x00 first
 	STA	(ENDPTR,X)	;Write it	
 	LDA	(ENDPTR,X)	;Read it back
-	BNE	MEMSEN		;Didn't read back $00. End sizing.
-	;Test by writing $FF
-	CLC			;Complement A ($00 -> $FF)
+	BNE	MEMSEN		;Not 0x00, done
+
+	CLC			;Now test with 0xFF
 	SBC	#$00
 	STA	(ENDPTR,X)	;Write it
 	LDA	(ENDPTR,X)	;Read it back
 	CMP	#$FF		;Compare it
-	BNE	MEMSEN		;Didn;t read back $FF. End sizing.
-	;Increment to the next byte
-	INC	ENDPLO
-	BNE	MEMSLP
-	INC	ENDPHI
-	BNE	MEMSLP
+	BNE	MEMSEN		;Not 0xFF, done
 
-MEMSEN:	RTS
+	INC	ENDPLO		;Increment low memory pointer
+	BNE	MEMSI1		;No overflow, continue
+	INC	ENDPHI		;Increment high memory pointer
+	BNE	MEMSI1		;No overflow, continue
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;INMPTR -- Increment Memory Pointer
-;Increments the memory pointer and compares the new value
-;  to ENDPTR. Compare flags are set.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+MEMSI2:	RTS			;We also end up here if we somehow have RAM
+				;all the way to 0xFFFF
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;INMPTR -- Increment memory pointer
+;
+;Increments the memory pointer and compares the new value to
+;ENDPTR. Compare flags are set.
+;
+;post: MEMPTR 16-bit value incremented
+;post: Z flag set if MEMPTR == ENDPTR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
 INMPTR:	INC	MEMPTR		;Increment the low byte
-	BNE	IMPCMP		;Didn't overflow, skip incrementing high byte
+	BNE	INMPT1		;Didn't overflow, skip incrementing high byte
 	INC	MEMPTR+1	;Increment the high byte
-;Increment Memory Pointer CoMPare
-IMPCMP:	LDA	MEMPTR+1	;Compare the high byte
+
+INMPT1:	LDA	MEMPTR+1	;Compare the high byte
 	CMP	ENDPTR+1
-	BNE	IMPEND		;Return with Z flag clear if different
+	BNE	INMPT2		;Return with Z flag clear if different
 	LDA	MEMPTR		;Compare the low byte
 	CMP	ENDPTR
 
-IMPEND:	RTS
+INMPT2:	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;RESTRT -- Restore Start
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;RESTRT -- Restore start
+;
 ;Move the VAR2,VAR3 pair into MEMPTR,MEMPTR+1
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 RESTRT:	LDA	VAR2
 	STA	MEMPTR
 	LDA	VAR3
 	STA	MEMPTR+1
 	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;GTSVAL -- Get Test Value
-;Calculates a byte that is derived from the current
-;  memory address and pass count and return it in A
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;GTSVAL -- Get test value
+;
+;Calculates a byte that is derived from the current memory 
+;address and pass count and return it in A.
+;
 ;A = (MEMPTR ^ MEMPTR+1) ^ PASS_COUNT
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 GTSVAL:	LDA	MEMPTR
 	EOR	MEMPTR+1
 	STA	VAR1
@@ -526,73 +568,93 @@ GTSVAL:	LDA	MEMPTR
 	EOR	VAR1
 	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;BYTOUT -- Byte Output
-;Write the binary byte in A as ASCII to the current display
-;  character specified by X. X is automatically
-;  incremented 2 times.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-BYTOUT:	PHA
-	PHA
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;BYTOUT -- Display a byte on the AIM-65 display
+;
+;Outputs the ASCII hex representation of the byte in A on
+;the AIM-65 display. High nybble is displayed at the
+;position in X, low nybble at X+1.
+;
+;pre: A register contains byte to display
+;pre: X register contains display position to start at
+;post: ASCII hex representation of byte in A displayed
+;post: A register contains original byte
+;post: X = X+2
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+BYTOUT:	PHA			;Store byte to display
+	PHA			;Again
+	LSR	A		;Shift high nybble to low nybble
 	LSR	A
 	LSR	A
 	LSR	A
-	LSR	A
-	JSR	NYBOUT
-	PLA
-	JSR	NYBOUT
-	PLA
+	JSR	NYBOUT		;Display high nybble
+	PLA			;Restore A
+	JSR	NYBOUT		;Display low nybble
+	PLA			;Restore A
 	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;NYBOUT -- Nybble Out
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;NYBOUT -- Display a nybble on the AIM-65 display
+;
 ;Outputs the hex nybble in the lower 4 bits of A as a
-;  single ASCII character
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;single ASCII character.
+;
+;pre: A register contains nybble to print
+;post: Low nybble of A displayed on AIM-65 display
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 NYBOUT:	AND	#$0F
-	ORA	#$30		;Place the value up in the ASCII range
+	ORA	#$30		;0-9 ASCII bias
 
 	CMP	#':'		;Greater than '9'?
 	BMI	NYBGUD		;Nope, output the character
 	CMP	#'G'		;Greater than 'G'?
 	BCS	NYBBAD		;Yes, skip outputting the character
 
-	CLC			;Add 7 to push the value to A-F if it is greater than 9
+	CLC			;A-F ASCII bias
 	ADC #$07
 
 NYBGUD:	JMP COUT		;Echo the character, and save an RTS by using a jmp.
 NYBBAD:	RTS			;Nybble is not valid
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;COUT -- Character Out
 ;
-;Write the character in A to the display character indexed
-;  by X and then increments X
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-COUT:	JSR	SCHAR		;Set character
-	INX			;Advance to the next character of the display
+;Write the character in A to the AIM-65 display.
+;
+;pre: A register contains character to print
+;pre: X register contains next empty character position
+;post: character printed to AIM-65 display
+;post X register contains next empty character position 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+COUT:	JSR	SCHAR		;Display A at X
+	INX			;Point to next empty character
 	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;DISCLR -- Display Clear
 ;
-;Clear the display by writing all spaces to it
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-DISCLR:	LDA	#' '		;Space character
-	LDX	#19		;All 20 characters
-DISCLP:	JSR	SCHAR
+;Clear the display by writing all spaces to it.
+;
+;post: AIM-65 display is cleared
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DISCLR:	LDA	#' '		;Display is ASCII, literal space
+	LDX	#19		;Clear all 20 characters
+DISCLP:	JSR	SCHAR		;Store space char at X position
 	DEX
-	CPX	#$FF
-	BNE	DISCLP
+	CPX	#$FF		;Have we underflowed count?
+	BNE	DISCLP		;No, send more spaces
 
 	RTS
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;PRINT -- Print a string
 ;
-;Prints a string pointed to by MEMPTR to the display
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Prints a string pointed to by MEMPTR to the display.
+;
+;pre: MEMPTR points to a fixed length string
+;post: string is printed to AIM-65 display
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 PRINT:	PHA			;Preserve A
 	TXA			;Preserve X
 	PHA
@@ -601,11 +663,11 @@ PRINT:	PHA			;Preserve A
 
 	LDX	#$00
 	LDY	#$00
-PRLOOP:	LDA	(MEMPTR),Y
+PRINT1:	LDA	(MEMPTR),Y
 	JSR	COUT
 	INY
-	CPX	#20
-	BNE	PRLOOP
+	CPX	#20		;Have we printed 20 chars yet?
+	BNE	PRINT1		;No, print more
 
 	PLA			;Restore Y
 	TAY
@@ -614,12 +676,16 @@ PRLOOP:	LDA	(MEMPTR),Y
 	PLA			;Restore A
 	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;DELAY -- Delay for a bit
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-DELAY:	TXA
+;
+;Imprecise software delay routine.
+;
+;post: A register contains Y register
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DELAY:	TXA			;Save X on stack
 	PHA
-	TYA
+	TYA			;Save Y on stack
 	PHA
 
 	LDX	#$FF
@@ -639,54 +705,47 @@ DLOOP2:	NOP
 	BNE	DLOOP1
 
 	PLA
-	TAY
+	TAY			;Restore Y from stack
 	PLA
-	TAX
+	TAX			;Restore X from stack
 
 	RTS
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;SCHAR -- Set Character
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SCHAR -- Set character
 ;
-;Sets the display character X to the character in A
+;Sets the display character at X to the character in A.
 ;
-;Display PIA mapping:
-;PA0 = A0	Digit select 0
-;PA1 = A1	Digit select 1
-;PA2 = ~CE1	Display 0	111110XX 0111 1100
-;PA3 = ~CE2	Display 1	111101XX
-;PA4 = ~CE3	Dispaly 2	111011XX
-;PA5 = ~CE4	Display 3	110111XX
-;PA6 = ~CE5	Display 4	101111XX
-;PA7 = ~W	Write		Data is clocked into display on rising edge
-;
-;PB0-PB6 = D0-D6	Data
-;PB7 = ~CU	Cursor input
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;pre: A register contains character to display
+;pre: X register contains position to display character at
+;post: character displayed on AIM-65 display
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 SCHAR:	PHA			;Preserve A
 
-	ORA	#$80		;Set the Cursor Input bit
-	STA	PIAORB		;Set the data lines
+	ORA	CHARMOD		;Disable cursor mode
+	STA	PIAORB		;Character on data lines
 
-	LDA	DISPCE,X	;Get the display chip select+character select bit pattern
-	STA	PIAORA		;Output the character address, select the display, and keep ~W high
-	;Toggle ~W low
-	AND	#$7F
+	LDA	DISPCE,X	;Get the display chip select+character
+				;select bit pattern
+	STA	PIAORA		;Output the character address, select
+				;the display, and keep ~W high
+
+	AND	DISPWR		;Toggle *W low to write displays
 	STA	PIAORA
-	;Toggle ~W high
-	ORA	#$80
+	ORA	NDISPWR		;Toggle *W high to disable writing
 	STA	PIAORA
 
-	;Reset the display select bits to their resting state
-	LDA	#%11111100
+	LDA	DCEIDLE		;Reset display select bits to idle
 	STA	PIAORA
-	;Reset the data bits to their resting state
-	LDA	#$80
+	LDA	CHARMOD		;Reset data bits to idle
 	STA	PIAORB
 
 	PLA			;Restore A
 	RTS
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;String Constants
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 RMFAIL:	.byte "ROM CHECKSUM FAILURE"
 RMGOOD: .byte "ROM CHECKSUM PASSED "
 ZPTEST:	.byte "TESTING ZERO-PAGE   "
@@ -699,7 +758,14 @@ RIOTFL: .byte "RIOT RAM FAILURE    "
 RIOTGD: .byte "RIOT RAM PASSED     "
 MEMERR: .byte "ERROR@0000 E=00 R=00"
 
-;Display CE decode table
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;DISPCE -- Table to decode display CE lines
+;
+;This table decodes chip select (CE) lines for the AIM-65's
+;alphanumeric displays. These displays are addressed and
+;controlled through PIA ports, rather than being directly on
+;the 6502 system bus.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 	.byte %11110111, %11110110, %11110101, %11110100
 	.byte %11101111, %11101110, %11101101, %11101100
@@ -707,8 +773,18 @@ DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 	.byte %10111111, %10111110, %10111101, %10111100
 
 ;Checksum byte. Set to something that makes the entire ROM sum out to $00
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SYMBYT -- Checksum byte
+;
+;This checksum byte must be set such that the entire ROM
+;checksums to 0x00. The ROM checksum test will fail
+;otherwise, and further tests will not run.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 SUMBYT:	.byte $100-$95
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;VECTORS -- Reset, NMI, and INT vectors
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 .segment "VECTORS"
 .word	START
 .word	START
