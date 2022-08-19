@@ -1,17 +1,19 @@
-# AIM-65 Memory Test
+Glitch Works AIM-65 Memory Test
+-------------------------------
 
 ROM-Resident Memory Test for Rockwell AIM-65
 
 Builds using CC65's CA65 assembler. The program automatically runs from ROM at address $F000
 
-## Usage
+### Usage
 
-Assemble the test by running `make` from the repository's directory. Burn the resulting binary to a 2532 EPROM, or to a 2732 EPROM if using a revision 4 or 5 AIM-65 jumpered to support it. Insert the ROM into ROM socket Z22 ($F000) and power on the machine. The ROM will perform the following tests:
+Assemble the test by running `make` from the repository's directory. A Perl script will calculate and update the ROM checksum automatically. Burn the resulting binary to a 2532 EPROM, or to a 2732 EPROM if using a revision 4 or 5 AIM-65 jumpered to support it. Insert the ROM into ROM socket Z22 ($F000) and power on the machine. The ROM will perform the following tests:
 
-- Stack page quick write presence
-- Zero page quick write presence
-- RIOT single-pass memory test
-- Full system memory test
+* ROM checksum
+* Stack page quick write presence
+* Zero page quick write presence
+* RIOT single-pass memory test
+* Full system memory test
 
 ### Stack Page Quick Write Presence
 
