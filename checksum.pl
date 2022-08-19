@@ -13,7 +13,7 @@
 #
 # Usage:
 #
-#   checksum.pl romimage.bin source.asm
+#   checksum.pl romimage.bin [source.asm]
 #
 # (c) 2022 Glitch Works, LLC
 # http://www.glitchwrks.com
@@ -34,7 +34,7 @@ my $checksum = sprintf('%04x', unpack("%16W*", $rom_image));
 print "ROM checksum: 0x" . $checksum . "\n";
 
 # If the low byte of the checksum is not 0x00, recalculate it
-if (substr($checksum, 2) ne "00") {
+if (substr($checksum, 2) ne "00" && $source_file) {
 	rename($source_file, $source_file . '.bak');
 	open(IN, '<' . $source_file . '.bak') or die $!;
 	open(OUT, '>' . $source_file) or die $!;
