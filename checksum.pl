@@ -21,13 +21,14 @@
 # Released under the GNU GPL v3, see LICENSE in project root.
 ################################################################################
 use bigint;
-use File::Slurp;
 use strict;
 use warnings;
 
 my $rom_file = $ARGV[0];
 my $source_file = $ARGV[1];
-my $rom_image = read_file($rom_file);
+
+open my $rom_image_fh, '<', $rom_file or die "Can't open ROM image file.";
+my $rom_image = do { local $/; <$rom_image_fh> };
 
 # Perform a 16-bit checksumming of the ROM image
 my $checksum = sprintf('%04x', unpack("%16W*", $rom_image));
