@@ -841,16 +841,17 @@ DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 	.byte %10111111, %10111110, %10111101, %10111100
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;SYMBYT -- Checksum byte
+;SUMVAL and SUMBYT -- Checksum byte
 ;
 ;This checksum byte must be set such that the entire ROM
 ;checksums to 0x00. The ROM checksum test will fail
 ;otherwise, and further tests will not run.
 ;
-;Normally, this value is calculated and updated using a Perl
+;Normally, SUMVAL is calculated and updated using a Perl
 ;script called from the Makefile.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-SUMBYT:	.byte $100-$95
+SUMVAL	=	$B
+SUMBYT:	.byte SUMVAL
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;VECTORS -- Reset, NMI, and INT vectors
