@@ -1,7 +1,5 @@
 PROJECT_NAME = memtest
 
-SHELL := /bin/bash
-
 AFLAGS		= -t none
 LFLAGS		= -t none
 RMFLAGS		= -f
@@ -21,7 +19,7 @@ $(PROJECT_NAME).bin: $(PROJECT_NAME).o
 	$(CL) $(LFLAGS) -C $(TARGET).cfg -o $(PROJECT_NAME).bin $(PROJECT_NAME).o
 
 clean:
-	$(RM) $(RMFLAGS) *.o *.bin
+	$(RM) $(RMFLAGS) *.o *.bin *.bin.bak
 
 test: $(PROJECT_NAME).bin
 	cp $(PROJECT_NAME).bin $(HOME)/.mame/roms/aim65/aim65mon.z23
