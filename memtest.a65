@@ -850,7 +850,7 @@ DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 ;Normally, SUMVAL is calculated and updated using a Perl
 ;script called from the Makefile.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-SUMVAL	=	$B
+SUMVAL	=	$6B
 SUMBYT:	.byte SUMVAL
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
