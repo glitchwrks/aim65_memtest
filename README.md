@@ -46,3 +46,21 @@ If an error is encountered during the memory test, it will be displayed in the f
 - XXXX: The address where the error was encountered.
 - E=YY: The byte that was expected to be read from the address.
 - R=ZZ: The byte that was actually read from the address.
+
+### `checksum.pl`
+
+This file is a Perl script that checksums generated ROM images:
+
+```
+./checksum.pl memtest.bin
+```
+
+The checksum will be displayed on the command line. If the low byte of the checksum is `0x00` the return value will be `0`; otherwise, the script will return `-1`.
+
+If the name of a source file is provided:
+
+```
+./checksum.pl memtest.bin memtest.a65
+```
+
+...and the checksum is nonzero, the Perl script will make a backup of the ASM source file. It will then find and replace the current `SUMVAL` to correct the ROM image to a zero checksum, after reassembly. The `Makefile` handles all of this automatically.
