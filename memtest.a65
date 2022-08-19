@@ -1,58 +1,32 @@
-;Memory Tester for the Rockwell AIM-65
-;Using the memory test routines from the OSI MEMORY TEST from OS65D 2.0 published in OSI Small System Journal Vol1 No.3, Sept 1977
-;Runs from the $F000 page 4K ROM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMTEST.A65 -- Memory Tester for the Rockwell AIM-65
 ;
-;Usage:
-;Assemble the test. Burn the binary to a 2532 EPROM, or to a 2732 EPROM if using a revision 4/5 AIM-65 jumpered to support it.
-;Insert the ROM into ROM socket Z22 ($F000) and power on the machine. The ROM will perform the following tests:
-; - Stack page quick write presence
-; - Zero page quick write presence
-; - RIOT single-pass memory test
-; - Full system memory test
+;This program is intended to be burned into an EPROM and
+;installed in socket Z22 (0xF000), and tests the following:
 ;
-;Stack Page Quick Write Presence:
-;This test ensures that the stack page in low RAM is present and functional enough to run the rest of the tests. If this
-;  test fails, ensure that the low RAM ICs are installed and are good. The test operates in the following way:
-;$00 is written to and then read back from addresses $100 to $1FF. If anything except for $00 is read back, the test fails
-;  and a message is displayed. $FF is then written to the same range and checked. If anything except for $FF is read back,
-;  the test fails with the same error.
+; * ROM checksum
+; * Stack page quick write test
+; * Zero page quick write test
+; * RIOT single-pass memory test
+; * Exhaustive test of remaining system RAM
 ;
-;Zero Page Quick Write Presence:
-;This test ensures that the zero page in low RAM is present and functional enough to run the rest of the tests. If this
-;  test fails, and the stack page test passes, the low RAM ICs are at fault. The operation of this test is identical
-;  to the stack page quick test, except that it operates in the range of $00-$FF as opposed to $100-$1FF.
+;See README.md for a more detailed explanation of the tests,
+;how to build from source, etc.
 ;
-;RIOT Single-Pass Memory Test:
-;This test checks the RAM of the RIOT separately. The RIOT's RAM is present at a higher memory address that is isolated from
-;  the main system memory, necessitating the use of this separate test. The RIOT's function is not needed for the main system
-;  memory test, but it is needed for the AIM-65 monitor ROM set. The test operates identically to the main system memory test
-;  (which is described in the next test description), with the exception that only the address range of $A400-$A47F is tested,
-;  and only one pass is performed.
+;(c) 2022 Glitch Works, LLC
+;http://www.glitchwrks.com/
 ;
-;Full System Memory Test:
-;This test tests the entire main system memory with the exception of zero page and the stack page. Before the test is run, a 
-;  memory sizing routine is called which automatically determines the top of memory for the following test to test up to. 
-;  The test itself then starts. The test display is shown as:
+;Released under the GNU GPL v3, see LICENSE in project root.
 ;
-;  0300-XXXX P=YY C=ZZ
+;The majority of initial programming and testing were done
+;for Glitch Works, LLC by TangentDelta:
 ;
-; - 0300: The starting address of the test. Set to $0300 for the full test, as this is where main memory starts. For the RIOT
-;           single-pass test, this is set to $A400. Each memory test cycle starts at this address.
-; - XXXX: The ending address of the test. Set based on the autosizing routine. For the RIOT single-pass test, this is set to
-;           $A47F. Each memory test cycle ends at this address before starting over for the next cycle.
-; - P=YY: The pass counter. Each pass takes 256 cycles. After 256 cycles, the pass counter increments by 1. For the RIOT
-;           single-pass test, only one pass is performed.
-; - C=ZZ: The cycle counter. The cycle counter is incremented every time the memory test works its way from the starting
-;           address to the ending address. The cycle count itself is used as part of the memory test to "seed" the
-;           pattern used during that cycle. Each cycle will therefore test every single bit pattern in every byte.
+;   https://github.com/tangentdelta
 ;
-;If an error is encountered during the memory test, it will be displayed in the following format:
-;
-;  ERROR@XXXX E=YY R=ZZ
-;
-;  - XXXX: The address where the error was encountered.
-;  - E=YY: The byte that was expected to be read from the address.
-;  - R=ZZ: The byte that was actually read from the address.
+;Exhaustive memory test based heavily on the routines from
+;the OSI MEMORY TEST from OS-65D 2.0, published in OSI
+;Small Systems Journal, Volume 1, Number 3, September 1977.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;MEMBEG -- Starting Address for Memory Autosize
@@ -61,6 +35,12 @@
 ;memory at lower addresses.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 MEMBEG	=	$200		;Default to 0x0200, above stack
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;Miscellaneous AIM-65 Equates
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RIOTBAS	=	$A400		;Start of the 6530 RIOT
+RIOTEND	=	RIOTBAS+$80	;End of RIOT RAM
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;AIM-65 ASCII Display Equates
@@ -89,18 +69,17 @@ PIACRA	=	PIA+1		;Port A control register
 PIAORB	=	PIA+2		;Port B output register
 PIADDB	=	PIA+2		;Port B data direction register
 PIACRB	=	PIA+3		;Port B control register
-CHARMOD	=	#$80		;Character output mode OR mask
-CURSMOD	=	#$7F		;Cursor output mode AND mask
-DCEIDLE	=	#%11111100	;Display select bits idle state
-DISPWR	=	#$7F		;Write to display AND mask
-NDISPWR	=	#$80		;Disable display write OR mask
+CHARMOD	=	$80		;Character output mode OR mask
+CURSMOD	=	$7F		;Cursor output mode AND mask
+DCEIDLE	=	%11111100	;Display select bits idle state
+DISPWR	=	$7F		;Write to display AND mask
+NDISPWR	=	$80		;Disable display write OR mask
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;Zero Page Variables
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-USRCMD	=	$C4		;Command character entered by the user
 PASCTR	=	$C5		;Pass Counter
-MAXPAS	=	$C6		;Maximum number of passes
+MAXPAS	=	$C6		;Maximum number of memory test passes
 VAR1	=	$C7
 VAR2	=	$C8
 VAR3	=	$C9
@@ -112,8 +91,11 @@ ENDPLO	=	ENDPTR
 ENDPHI	=	ENDPTR+1
 TEMP	=	$CE
 
-;Page sum macro
-;Assumes that X is already 0
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PSUMLP -- Page sum macro
+;
+;pre: X contains 0
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 .macro	PGESUM	ADDR
 .local	PSUMLP
 PSUMLP:	CLC
@@ -122,38 +104,60 @@ PSUMLP:	CLC
 	BNE	PSUMLP
 .endmacro
 
-;Page test macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PGETST -- Page test macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 .macro	PGETST	ADDR
 .local	PTSTW, PTSTR, TSTBAD, END
 	LDX	#$00		;Pattern
 	LDY	#$00		;Index
-;Page test write loop.
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PTSTW -- Page test write loop
+;
+;pre: X contains starting pattern value
+;pre: Y contains 0
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 PTSTW:	TXA
 	STA	ADDR,Y
 	INX
 	INY
 	BNE	PTSTW
-	;X = starting pattern value
-	;Y = 0
-;Page test read loop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PTSTR -- Page test read loop
+;
+;pre: X contains starting pattern value
+;pre: Y contains 0
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 PTSTR:	TXA			;Transfer the pattern to A
 	CMP	ADDR,Y		;Compare the pattern to what was written
 	BNE	TSTBAD		;If different, return with error
 	INX
 	INY
 	BNE	PTSTR
-	;X = starting pattern value
-	;Y = 0
-	INX			;Increment X to the next starting pattern bitmap
+
+	INX			;Increment X to the next starting pattern 
+				;bitmap
 	BNE	PTSTW		;Start the next cycle if pattern is not 0
-	;Once the starting pattern returns to 0, the test is done
-	CLC			;Return with carry clear, indicating a successful test
-	BCC	END
+	
+	CLC			;Once the starting pattern returns to 0, the
+				;test is done
+	BCC	END		;Return with carry clear, indicating a 
+				;successful test
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TSTBAD -- Exit routine for failed test cycle
+;
+;post: CY flag is set to indicate failure
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 TSTBAD:	SEC			;Return with carry set, indicating a failed test
 END:
 .endmacro
 
-;Simple delay macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SDELAY -- Simple delay macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 .macro SDELAY
 .local	DLOOP1, DLOOP2
 	LDX	#$FF
@@ -173,7 +177,9 @@ DLOOP2:	NOP
 	BNE	DLOOP1
 .endmacro
 
-;Simple message printer macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SPMSG -- Simple message printer macro
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 .macro	SPMSG ADDR
 .local	MSPLUP
 	LDX	#$00
@@ -192,24 +198,28 @@ MSPLUP:	LDA	ADDR,X
 	BNE	MSPLUP
 .endmacro
 
-
-;Checksum the ROM before tests
-;Change $00 $FF tests to include $AA and $55. Make less address dependant
 .segment "CODE"
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;START -- Begin the test
+;
+;ROM is checksummed before testing.
+;
+;TODO: change $00 $FF tests to include $AA and $55. Make
+;less address dependent.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 START:	SEI
 	LDX	#$FF
 	TXS
 
-	;Select the output registers of ports A and B
-	LDA	#04
+	LDA	#04		;Select output registers A and B
 	STA	PIACRA
 	STA	PIACRB
 
-	;Reset the display select bits to their resting state
-	LDA	#%11111100
+	LDA	#DCEIDLE	;Display select bits in idle state
 	STA	PIAORA
-	;Reset the data bits to their resting state
-	LDA	#$80
+
+	LDA	#$80		;Put data bits in idle state
 	STA	PIAORB
 
 	LDA	#00
@@ -223,9 +233,9 @@ START:	SEI
 	STA	PIACRA
 	STA	PIACRB
 
-	;Clear all of the cursor bits
-	LDX	#$00		
-CURCLP:	LDA	#$00		;D0 = 0, ~CU = 0
+
+	LDX	#$00		;Clear all of the cursor bits
+CURCLP:	LDA	#$00		;D0 = 0, *CU = 0
 	STA	PIAORB
 	LDA	DISPCE,X	;Get the chip select bits for this character
 	STA	PIAORA		;Set the lines
@@ -238,10 +248,9 @@ CURCLP:	LDA	#$00		;D0 = 0, ~CU = 0
 	CPX	#20
 	BNE	CURCLP		;Clear the next cursor position
 
-;Run a checksum on the ROM
-	LDX	#$00
-	LDA	#$00
-	PGESUM	$F000
+	LDX	#$00		;Start checksumming ROM, we use a number
+	LDA	#$00		;of macro calls to inline this, since we
+	PGESUM	$F000		;don't know if we have usable RAM.
 	PGESUM	$F100
 	PGESUM	$F200
 	PGESUM	$F300
@@ -258,43 +267,43 @@ CURCLP:	LDA	#$00		;D0 = 0, ~CU = 0
 	PGESUM	$FE00
 	PGESUM	$FF00
 	ORA	#$00		;Set the flags for A
-	BEQ	ROMGUD
-	SPMSG	RMFAIL
-	BEQ	*
+	BEQ	ROMGUD		;Checksum passed, continue
+	SPMSG	RMFAIL		;ROM fail, use the simple message printer
+	BEQ	*		;No HALT, so sit in a loop
 
-ROMGUD:	SPMSG	RMGOOD
-	SDELAY
+ROMGUD:	SPMSG	RMGOOD		;ROM good, use simple message printer
+	SDELAY			;Delay so user can read the message
 
-;Test the stack first so that we can use subroutine calls
-	SPMSG	STTEST
+	SPMSG	STTEST		;Display stack test message
 	PGETST	$100		;Test stack page using the page test macro
 	BCS	STBAD		;Output error message if the stack is bad
 
-
 	LDX	#$00
-STGLUP:	LDA	STGOOD,X
-	JSR	COUT
-	CPX	#20
-	BNE	STGLUP
-	JSR	DELAY
+STGLUP:	LDA	STGOOD,X	;Stack is good, so we can now use subroutine
+	JSR	COUT		;calls. We still haven't tested zero page
+	CPX	#20		;though, so we can't use the string
+	BNE	STGLUP		;printer.
+	JSR	DELAY		;Delay so user can read the message
 
-	
-;Test zero-page too
-	SPMSG	ZPTEST
-	PGETST	$00
-	BCS	ZPBAD
+	SPMSG	ZPTEST		;Display zero page test message
+	PGETST	$00		;Test zero page using the page test macro
+	BCS	ZPBAD		;Output error message if zero page is bad
 
-	LDA	#<ZPGOOD
+	LDA	#<ZPGOOD	;Zero page is good, now we can use variables
 	STA	MEMPLO
 	LDA	#>ZPGOOD
 	STA	MEMPHI
-	JSR	PRINT
-	JSR	DELAY
+	JSR	PRINT		;Display zero page good message
+	JSR	DELAY		;Delay so user can read the message
 
-	JMP	PGSGUD		;Pages look good, jump to start
+	JMP	TSRIOT		;Stack and ZP good, test RIOT RAM
 
-
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ZPBAD -- Handle failed zero page memory
+;
+;We can't use the usual string printer since zero page
+;variable space may have issues.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ZPBAD:	LDX	#$00
 ZPBLP:	LDA	ZPFAIL,X	;Get the character to send to the display
 	ORA	#$80		;Set the cursor select bit
@@ -309,181 +318,240 @@ ZPBLP:	LDA	ZPFAIL,X	;Get the character to send to the display
 	INX
 	CPX	#20
 	BNE	ZPBLP
-	BEQ	*		;Just sit in a loop when done
+	BEQ	*		;No HALT, sit in a loop
 
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STBAD -- Handle failed stack page memory
+;
+;We use the simple printer macro since we can't make
+;subroutine calls.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 STBAD:	SPMSG	STFAIL
-	BEQ	*
+	BEQ	*		;No HALT, sit in a loop
 
-	;Pages are good, now we can use zero-page and the stack
-PGSGUD:	;Test the RIOT's RAM
-	LDA	#<$A400
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TSRIOT -- Test the RIOT's RAM
+;
+;If we get to this point, zero page and stack page have both
+;passes the basic memory test. Falls through to main memory
+;test.
+;
+;We don't use the RIOT's RAM for this ROM, but stock AIM-65
+;ROMs do.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TSRIOT:	LDA	#<RIOTBAS	;Start address of RIOT RAM
 	STA	VAR2
-	LDA	#>$A400
+	LDA	#>RIOTBAS
 	STA	VAR3
-	LDA	#<$A480
+	LDA	#<RIOTEND	;Eend address of RIOT RAM
 	STA	ENDPLO
-	LDA	#>$A480
+	LDA	#>RIOTEND
 	STA	ENDPHI
 	LDA	#$01
 	STA	MAXPAS		;Only test the RIOT's RAM once
 	JSR	MEMTST
 
-	LDA	#<RIOTGD
+	LDA	#<RIOTGD	;Display RIOT RAM good message
 	STA	MEMPLO
 	LDA	#>RIOTGD
 	STA	MEMPHI
 	JSR	PRINT
-	JSR	DELAY
+	JSR	DELAY		;Delay so user can read the message
 
-FULTST:	JSR	MEMSIZ		;Size the memory and write the ending address to ENDPTR
-	;Set up the starting memory address pointer
-	LDA	#<MEMBEG
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FULTST -- Main memory test
+;
+;This routine sizes main memory and begins testing it
+;exhaustively.
+;
+;pre: MEMBEG is initialized to first address to test
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FULTST:	JSR	MEMSIZ		;Size the memory and write the ending
+				;address to ENDPTR
+	LDA	#<MEMBEG	;Set up pointer to start of test range
 	STA	VAR2
 	LDA	#>MEMBEG
 	STA	VAR3
-	;Go for the full 256 passes (this will take a while!)
-	LDA	#$FF
+
+	LDA	#$FF		;256 passes, this will take a long time
 	STA	MAXPAS
 	JSR	MEMTST		;Start the full test
 
 	JMP	FULTST		;Loop the main test
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;MEMTST -- Memory Test
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;MEMTST -- Exhaustive memory test
 ;
-;Test memory from (VAR2, VAR3) to ENDPTR
-;MAXPAS number of passes
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-MEMTST:
-	JSR	DISCLR		;Clear the display
+;This memory test is heavily based on the OSI MEMORY TEST
+;from OS-65D 2.0, published in the Small Systems Journal,
+;Volume 1, Number 3, September 1977.
+;
+;The test has been modified to work with the display
+;limitations of the AIM-65. Status output format is:
+;
+;   SSSS-EEEE P=XX C=YY
+;
+;SSSS is the starting address, in hex
+;EEEE is the ending address, in hex
+;XX is the current pass count (256 cycles == 1 pass)
+;YY is the cycle count
+;
+;Falls through to STRTST.
+;
+;pre: VAR2, VAR3 contain first address to test
+;pre: ENDPTR contains last address to test
+;pre: MAXPAS contains the number of passes to do
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MEMTST:	JSR	DISCLR		;Clear the display
 	LDX	#$00
-	;Output the test starting address to characters 0-3
-	LDA	VAR3		;MSB
+
+	LDA	VAR3		;Print the test starting address
 	JSR	BYTOUT
-	LDA	VAR2		;LSB
+	LDA	VAR2
 	JSR	BYTOUT
-	;Separator
-	LDA	#'-'
+
+	LDA	#'-'		;Print a separator
 	JSR	COUT
-	;Output the test ending address to character 4-7
-	;Start by decrementing first to create a less confusing number
-	LDA	ENDPLO
-	BNE	LENPHI		;Leave end pointer high alone if no underflow
-	DEC	ENDPHI
-	;Print it
-LENPHI:	DEC	ENDPLO
-	LDA	ENDPHI
+
+	LDA	ENDPLO		;Print the test ending address, decrement
+				;it first for clarity
+	BNE	MEMTS1		;Leave end pointer high alone if no underflow
+	DEC	ENDPHI		;Decrement high byte of address
+
+MEMTS1:	DEC	ENDPLO		;Decrement low byte of address
+	LDA	ENDPHI		;Print ending address
 	JSR	BYTOUT
 	LDA	ENDPLO
 	JSR	BYTOUT
-	;Now increment the end pointer back up to what the test exppects
-	INC	ENDPLO
-	BNE	IENPHI		;Don't increment the high byte if no overflow
+
+	INC	ENDPLO		;Increment the ending address to original value
+	BNE	MEMTS2		;Don't increment the high byte if no overflow
 	INC	ENDPHI		;Increment the high byte
 
-IENPHI:	INX			;Space
-	LDA	#'P'		;Pass count
+MEMTS2:	INX			;Increment display pointer to leave space
+	LDA	#'P'		;Print pass count label
 	JSR	COUT
 	LDA	#'='
 	JSR	COUT
 
-	;Reset and output the successful pass counter
-	LDA	#$00
+	LDA	#$00		;Reset pass counter to 0
 	STA	PASCTR
-	JSR	BYTOUT
+	JSR	BYTOUT		;Print pass counter
 
-	INX			;Space
-	LDA	#'C'		;Cycle count
+	INX			;Increment display pointer to leave space
+	LDA	#'C'		;Print cycle count label
 	JSR	COUT
 	LDA	#'='
 	JSR	COUT
 
-;0000-0000 P=00 C=00
-
-	;Prepare the variables used by thes test
-	LDX	#$00		;X is used to keep track of the sub-pass
-	LDA	#$77		;Used for seeding something
+	LDX	#$00		;X = cycle count
+	LDA	#$77		;A = seed for memory test
 	STA	VAR1
 
-;Start of Test
-STRTST:	JSR	RESTRT		;Move VAR2,VAR3 (user-entered starting address) into MEMPTR pointer
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STRTST -- Start of the memory test
+;
+;MEMTST must be run before this routine, it falls through to
+;STRTST.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+STRTST:	JSR	RESTRT		;Move starting address into MEMPTR pointer
 
 	TXA			;Output the current pass
-
 	LDX	#17		;Start at character 17
 	JSR	BYTOUT
 	
 	TAX			;Restore the pass number
 
-;Set all memory locations from VAR2,VAR3 to ENDPTR to the value calculated by GTSVAL
-TSTWRT:	JSR	GTSVAL		;Get a test data value based on the memory pointer address
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TSTWRT -- Write memory test pattern
+;
+;This routine sets all memory locations from VAR2,VAR3 to
+;ENDPTR to the value calculated by GTSVAL.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TSTWRT:	JSR	GTSVAL		;Get a test data value based on the memory 
+				;pointer address
 	STA	(MEMPTR),Y	;Store it at the address we're testing
 	JSR	INMPTR		;Increment the memory pointer
-	BNE	TSTWRT		;Loop again if MEMPTR <> ENDPTR
+	BNE	TSTWRT		;Loop again if MEMPTR != ENDPTR
 
-	
-;Read back all memory locations from VAR2,VAR3 to ENDPTR and compare them to the calculated GTSVAL
 	JSR	RESTRT		;Restore START value to MEMPTR
-TESTRD:	JSR	GTSVAL		;Get the test data value based on the current memory pointer
-	CMP	(MEMPTR),Y		;Compare it to what was stored in the previous loop
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TESTRD -- Read memory test pattern
+;
+;This routine reads back all memory locations from
+;VAR2,VAR3 to ENDPTR and compares them to the calculated
+;GTSVAL.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TESTRD:	JSR	GTSVAL		;Get the test data value based on the current 
+				;memory pointer
+	CMP	(MEMPTR),Y	;Compare it to what was stored in previous loop
 	BNE	TSTERR		;If they're different, throw an error
 	JSR	INMPTR		;Increment the memory pointer
-	BNE	TESTRD		;Loop again if MEMPTR <> ENDPTR
+	BNE	TESTRD		;Loop again if MEMPTR != ENDPTR
 
 	INX			;Increment the number of test passes
 	BNE	STRTST		;If we're <256 passes, test again.
 
-
-;Increment the pass counter and update the pass count on the display
-	INC	PASCTR
+	INC	PASCTR		;Increment pass counter and update display
 	LDA	PASCTR
 	CMP	MAXPAS		;Do we need to stop?
-	BEQ	TSTDUN		;Stop the test and return
+	BEQ	TESTR1		;Stop the test and return
 	LDX	#12
 	JSR	BYTOUT
 	LDX	#$00
 	JMP	STRTST		;Start next pass!
 
-TSTDUN:	RTS
+TESTR1:	RTS
 
-;Diplay the test error code
-;A contains the value that should have been read back
-TSTERR:	STA	VAR3		;Save value for later
-	LDA	(MEMPTR),Y
-	STA	VAR2
-	LDA	MEMPLO
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TSTERR -- Display test error code on AIM-65 display
+;
+;This routine displays an error in the format:
+;
+;   ERROR@XXXX E=YY R=ZZ
+;
+;XXXX is the address of the failure, in hex
+;YY is the expected value for the location, in hex
+;ZZ is the value read back from RAM at the location, in hex
+;
+;VAR3 is used to store A (the expected value), VAR2 is used
+;to store the value read back from memory.
+;
+;pre: A contains the expected memory value
+;pre: MEMPTR points to address of failure
+;post: failure information is displayed on AIM-65 display
+;post: execution stopped with infinite loop
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TSTERR:	STA	VAR3		;VAR3 = expected value
+	LDA	(MEMPTR),Y	;Get read back value
+	STA	VAR2		;VAR2 = actual value read back
+	LDA	MEMPLO		;Temporarily store MEMPTR in ENDPTR
 	STA	ENDPLO
 	LDA	MEMPHI
 	STA	ENDPHI
 
-;Output (MEMPHI,MEMPLO),VAR3,VAR2 in the form
-; MEMPTR GOOD BAD
-;ERROR@0000 E=00 R=00
-	LDA	#<MEMERR
+	LDA	#<MEMERR	;Set MEMPTR to error string
 	STA	MEMPLO
 	LDA	#>MEMERR
 	STA	MEMPHI
-	JSR	PRINT
+	JSR	PRINT		;Print it
 
-	;Output error address
-	LDX	#06
-
-	LDA	ENDPHI
+	LDX	#06		;Output error address
+	LDA	ENDPHI		;Print high byte of error address
 	JSR	BYTOUT
-	LDA	ENDPLO
+	LDA	ENDPLO		;Print low byte of error address
 	JSR	BYTOUT
 	
-	LDX	#13
+	LDX	#13		;Print expected value
 	LDA	VAR3
 	JSR	BYTOUT
 
-	LDX	#18
+	LDX	#18		;Print readback value
 	LDA	VAR2
 	JSR	BYTOUT
 
-	JMP	*		;Just sit in a loop
+	JMP	*		;No HALT, so sit in a loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;MEMSIZ -- Autosize available RAM
@@ -504,14 +572,14 @@ MEMSIZ:	LDA	#<MEMBEG	;Load the starting address
 MEMSI1:	TXA			;Test by writing 0x00 first
 	STA	(ENDPTR,X)	;Write it	
 	LDA	(ENDPTR,X)	;Read it back
-	BNE	MEMSEN		;Not 0x00, done
+	BNE	MEMSI2		;Not 0x00, done
 
 	CLC			;Now test with 0xFF
 	SBC	#$00
 	STA	(ENDPTR,X)	;Write it
 	LDA	(ENDPTR,X)	;Read it back
 	CMP	#$FF		;Compare it
-	BNE	MEMSEN		;Not 0xFF, done
+	BNE	MEMSI2		;Not 0xFF, done
 
 	INC	ENDPLO		;Increment low memory pointer
 	BNE	MEMSI1		;No overflow, continue
@@ -722,7 +790,7 @@ DLOOP2:	NOP
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 SCHAR:	PHA			;Preserve A
 
-	ORA	CHARMOD		;Disable cursor mode
+	ORA	#CHARMOD	;Disable cursor mode
 	STA	PIAORB		;Character on data lines
 
 	LDA	DISPCE,X	;Get the display chip select+character
@@ -730,14 +798,14 @@ SCHAR:	PHA			;Preserve A
 	STA	PIAORA		;Output the character address, select
 				;the display, and keep ~W high
 
-	AND	DISPWR		;Toggle *W low to write displays
+	AND	#DISPWR		;Toggle *W low to write displays
 	STA	PIAORA
-	ORA	NDISPWR		;Toggle *W high to disable writing
+	ORA	#NDISPWR	;Toggle *W high to disable writing
 	STA	PIAORA
 
-	LDA	DCEIDLE		;Reset display select bits to idle
+	LDA	#DCEIDLE	;Reset display select bits to idle
 	STA	PIAORA
-	LDA	CHARMOD		;Reset data bits to idle
+	LDA	#CHARMOD	;Reset data bits to idle
 	STA	PIAORB
 
 	PLA			;Restore A
@@ -772,13 +840,15 @@ DISPCE:	.byte %11111011, %11111010, %11111001, %11111000
 	.byte %11011111, %11011110, %11011101, %11011100
 	.byte %10111111, %10111110, %10111101, %10111100
 
-;Checksum byte. Set to something that makes the entire ROM sum out to $00
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;SYMBYT -- Checksum byte
 ;
 ;This checksum byte must be set such that the entire ROM
 ;checksums to 0x00. The ROM checksum test will fail
 ;otherwise, and further tests will not run.
+;
+;Normally, this value is calculated and updated using a Perl
+;script called from the Makefile.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 SUMBYT:	.byte $100-$95
 
