@@ -5,6 +5,8 @@ ROM-resident memory test for the Rockwell AIM-65 single-board computer.
 
 Builds using CC65's CA65 assembler. The program automatically runs from ROM at address `0xF000`.
 
+Pre-programmed EPROMs are available through [our Tindie store](https://www.tindie.com/products/27742/).
+
 ### Usage
 
 Assemble the test by running `make` from the repository's directory. A Perl script will calculate and update the ROM checksum automatically. Burn the resulting binary to a 2532 EPROM, or to a 2732 EPROM if using a revision 4 or 5 AIM-65 jumpered to support it. Insert the ROM into ROM socket Z22 (`0xF000`) and power on the machine. The ROM will perform the following tests:
